@@ -1,0 +1,22 @@
+{
+  "name": "Administrasi PIK-R MANSEKU",
+  "short_name": "Absen PIK-R",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f1ee",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "/logo_pik-r-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/logo_pik-r.png",
+      "sizes": "375x376",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

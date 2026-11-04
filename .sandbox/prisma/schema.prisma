@@ -1,0 +1,319 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:../local.db"
+}
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
+}
+
+model Candidate {
+  id              String   @id @default(uuid())
+  nisn            String   @unique
+  name            String
+  className       String
+  whatsappNumber  String
+  email           String
+  gender          String
+  asalSekolah     String   @default("-")
+  reason          String
+  status          String   @default("PENDING")
+  photoPath       String?
+  
+  // Authentication fields for Member Login
+  password        String?  // Hashed password
+  plainPassword   String?  // Plaintext password for Admin export/view
+  
+  // Notification status
+  emailNotified   Boolean  @default(false)
+  waNotified      Boolean  @default(false)
+  lastStatus      String   @default("PENDING")
+  
+  // Selection schedule fields
+  selectionDate       DateTime?
+  selectionDay        String?
+  selectionNotified   Boolean  @default(false)
+  attendanceStatus    String?  @default("BELUM_KONFIRMASI") // HADIR, TIDAK_HADIR, BELUM_KONFIRMASI
+
+  selectionScore      SelectionScore?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model SelectionScore {
+  id              String    @id @default(uuid())
+  candidateId     String    @unique
+  candidate       Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  // POS 1: Wawancara dan Perkenalan
+  pos1Evaluator      String?
+  pos1Comm           Float?   // Komunikasi (1-10)
+  pos1Trust          Float?   // Percaya Diri (1-10)
+  pos1Motiv          Float?   // Motivasi (1-10)
+  pos1Komitmen       Float?   // Komitmen (1-10)
+  pos1KerjaSama      Float?   // Kerja Sama (1-10)
+  pos1Kepemimpinan   Float?   // Kepemimpinan (1-10)
+  pos1Pengetahuan    Float?   // Pengetahuan (1-10)
+  pos1Etika          Float?   // Etika (1-10)
+  pos1Bonus          Float?   // Bonus (1-10)
+  pos1Avg            Float?   // Rata-rata POS 1
+  pos1Completed      Boolean  @default(false)
+  pos1Notes          String?
+
+  // POS 2: Tes Minat Bakat
+  pos2Evaluator   String?
+  pos2Creativity  Float?   // Kreativitas (1-10)
+  pos2Mastery     Float?   // Penguasaan (1-10)
+  pos2Pres        Float?   // Presentasi (1-10)
+  pos2Orig        Float?   // Orisinalitas (1-10)
+  pos2Potency     Float?   // Potensi (1-10)
+  pos2Confidence  Float?   // Percaya Diri (1-10)
+  pos2Avg         Float?   // Rata-rata POS 2
+  pos2Completed   Boolean  @default(false)
+  pos2Notes       String?
+
+  // POS 3: Studi Kasus
+  pos3Evaluator      String?
+  pos3Pemahaman      Float?   // Pemahaman (1-10)
+  pos3Analysis       Float?   // Analisis (1-10)
+  pos3Solution       Float?   // Solusi (1-10)
+  pos3Empati         Float?   // Empati (1-10)
+  pos3PublicSpk      Float?   // Public Speaking (1-10)
+  pos3Logika         Float?   // Logika (1-10)
+  pos3Pengetahuan    Float?   // Pengetahuan (1-10)
+  pos3Avg            Float?   // Rata-rata POS 3
+  pos3Completed      Boolean  @default(false)
+  pos3Notes          String?
+
+  // Total & Final Status
+  finalScore      Float?   // Rata-rata 33.3% per POS: (pos1Avg + pos2Avg + pos3Avg) / 3
+  isCompleted     Boolean  @default(false) // Overall lock status
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Admin {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String
+  role      String   @default("KABINET_UMUM")
+  posts     Post[]
+  blogPosts BlogPost[] // Relation to BlogPost
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Post {
+  id        String    @id @default(uuid())
+  title     String
+  slug      String    @unique
+  content   String
+  authorId  String
+  author    Admin     @relation(fields: [authorId], references: [id])
+  views     Int       @default(0) // views count
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model BlogPost {
+  id           String        @id @default(uuid())
+  title        String
+  slug         String        @unique
+  content      String
+  category     String        @default("Umum")
+  tags         String        @default("") // Comma-separated tags
+  status       String        @default("DRAFT") // DRAFT | PUBLISHED
+  featuredImg  String?
+  views        Int           @default(0)
+  authorId     String?       // FK to Admin (optional)
+  memberId     String?       // FK to Member (optional)
+  author       Admin?        @relation(fields: [authorId], references: [id])
+  memberAuthor Member?       @relation(fields: [memberId], references: [id])
+  comments     BlogComment[]
+  likes        BlogLike[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model BlogComment {
+  id        String        @id @default(uuid())
+  postId    String
+  post      BlogPost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  content   String
+  memberId  String?       // FK to Member (optional, if logged in)
+  member    Member?       @relation(fields: [memberId], references: [id])
+  username  String        // fallback for guest
+  parentId  String?
+  parent    BlogComment?  @relation("CommentThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   BlogComment[] @relation("CommentThread")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model BlogLike {
+  id        String   @id @default(uuid())
+  postId    String
+  post      BlogPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  memberId  String?  // Nullable for guest
+  member    Member?  @relation(fields: [memberId], references: [id])
+  guestId   String?  // string for guest
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
+model Member {
+  id              String   @id @default(uuid())
+  nisn            String   @unique
+  name            String
+  className       String
+  whatsappNumber  String
+  email           String
+  gender          String
+  asalSekolah     String   @default("-")
+  password        String
+  plainPassword   String?
+  status          String   @default("ACTIVE")
+  joinYear        Int      @default(2026)
+  role            String   @default("member")
+  photoPath       String?
+  bio             String?  // kata-kata / bio singkat di halaman biodata /@slug
+  cardConfig      String?  // JSON: kustomisasi kartu biodata /@slug oleh anggota (cover, foto kartu, field tersembunyi, kartu info)
+  memberCode      String?  @unique // kode ID Card, mis. PIKR_0001-26 (barcode depan)
+  slug            String?  @unique // link profil /@slug (QR belakang ID Card)
+  attendances     Attendance[]
+  orgMember       OrgMember?  // back-relation
+  blogPosts       BlogPost[]   // written posts
+  blogComments    BlogComment[] // posted comments
+  blogLikes       BlogLike[]   // likes
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model OrgMember {
+  id          String   @id @default(uuid())
+  name        String
+  role        String
+  jabatan     String
+  yearStart   Int
+  yearEnd     Int?
+  isCurrent   Boolean  @default(false)
+  photoPath   String?  // used only for orphan entries (no linked Member account)
+  quote       String?
+  memberId    String?  @unique // FK to Member (nullable)
+  member      Member?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AlumniTestimonial {
+  id          String   @id @default(uuid())
+  name        String
+  angkatan    String
+  photoPath   String?
+  content     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ScheduledAnnouncement {
+  id            String    @id @default(uuid())
+  title         String
+  targetGroup   String    // e.g. 'GROUP_WA_CALON', 'GROUP_WA_PENGURUS', 'PERSONAL_WA', 'CUSTOM_JID'
+  targetJid     String?   // e.g. '1203630123456789@g.us'
+  targetName    String?   // e.g. 'Grup Calon Anggota PIK-R 2026'
+  message       String
+  mediaUrl      String?   // file path or URL for uploaded photo/video/doc
+  mediaType     String?   // 'IMAGE', 'VIDEO', 'DOCUMENT', 'NONE'
+  mediaName     String?   // Original filename
+  scheduledAt   DateTime
+  status        String    @default("SCHEDULED") // 'SCHEDULED', 'SENT', 'FAILED', 'CANCELLED'
+  sentAt        DateTime?
+  totalTarget   Int       @default(0)
+  totalSent     Int       @default(0)
+  failureReason String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model WhatsAppGroup {
+  id          String   @id @default(uuid())
+  jid         String   @unique
+  name        String
+  memberCount Int      @default(0)
+  lastMsgAt   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AnnouncementLog {
+  id             String   @id @default(uuid())
+  announcementId String?
+  sender         String?
+  receiverJid    String?
+  content        String
+  type           String   @default("INFO") // 'INCOMING_MSG', 'OUTGOING_BROADCAST', 'DEBUG'
+  createdAt      DateTime @default(now())
+}
+
+model PasswordResetOtp {
+  id          String   @id @default(uuid())
+  identifier  String   // NISN or WA number
+  otpCode     String
+  expiresAt   DateTime
+  isUsed      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([isUsed, expiresAt])
+  @@index([identifier])
+}
+
+// ─── Absensi (absen.pikr-manseku.my.id) ───────────────────────────────
+model AttendanceSession {
+  id          String       @id @default(uuid())
+  date        String       @unique // YYYY-MM-DD (WIB, UTC+7)
+  type        String       @default("WAJIB") // WAJIB (Alfa dihitung otomatis) | TAMBAHAN (Alfa diisi manual)
+  title       String       @default("Kegiatan Rutin")
+  description String?
+  startTime   String?      // HH:mm, jam kegiatan wajib dari pengaturan
+  openedBy    String
+  records     Attendance[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Attendance {
+  id        String            @id @default(uuid())
+  sessionId String
+  session   AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  memberId  String
+  member    Member            @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  status    String            // HADIR | SAKIT | IZIN | ALFA
+  checkIn   DateTime?
+  checkOut  DateTime?
+  note      String?
+  createdBy String
+  updatedBy String?
+  clientId  String?           @unique // id dari HP, mencegah data dobel saat kirim ulang offline
+  logs      AttendanceLog[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([sessionId, memberId])
+}
+
+model AttendanceLog {
+  id           String     @id @default(uuid())
+  attendanceId String
+  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  action       String     // IN | OUT | SAKIT | IZIN | ALFA | EDIT
+  detail       String?
+  by           String
+  createdAt    DateTime   @default(now())
+}

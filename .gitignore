@@ -1,0 +1,45 @@
+# Dependensi & hasil build
+node_modules/
+dist/
+build/
+.venv/
+__pycache__/
+*.pyc
+
+# Alat unduhan & skrip sekali pakai
+.tools/
+.restore/
+
+# Sandbox uji: simpan skrip tes, abaikan data dan hasil
+.sandbox/*
+!.sandbox/package.json
+!.sandbox/prisma/
+.sandbox/prisma/*
+!.sandbox/prisma/schema.prisma
+!.sandbox/test-*.js
+!.sandbox/serve*.js
+!.sandbox/seed-many.mjs
+!.sandbox/roundtrip-seed.mjs
+!.sandbox/ui/
+.sandbox/ui/*
+!.sandbox/ui/*.cjs
+!.sandbox/ui/package.json
+
+# DATA PRIBADI ANGGOTA — jangan pernah ke GitHub
+# (foto ID Card, daftar berisi NISN/email/WhatsApp, cadangan database, hasil scan)
+Gelombang */
+ID CARD PIK-R OK/
+Id card pik-r manseku*/
+idcard_scan.json
+Daftar_ID_Card_*.xlsx
+data_anggota.*
+failed-list.xlsx
+*.db
+pikr_manseku_backup*
+pikr_backup_*
+.env
+.env.*
+config.json
+
+# Arsip besar
+*.zip
