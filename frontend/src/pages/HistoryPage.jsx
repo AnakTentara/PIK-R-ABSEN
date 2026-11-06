@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useView } from '../lib/store.js';
 import toast from 'react-hot-toast';
 import { ArrowLeft, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, Loader2, CalendarX2 } from 'lucide-react';
 import api, { errMsg } from '../lib/api.js';
@@ -16,7 +16,7 @@ const FILTER_LABEL = { SEMUA: 'Semua', KOSONG: 'Belum diisi' };
  * Mode Rentang: ringkasan jumlah Hadir/Sakit/Izin/Alfa per anggota.
  */
 export default function HistoryPage() {
-  const nav = useNavigate();
+  const go = useView(s => s.go);
   const today = nowWibDate();
   const [mode, setMode] = useState('day'); // day | range
   const [date, setDate] = useState(today);
@@ -122,7 +122,7 @@ export default function HistoryPage() {
   return (
     <div className="app">
       <header className="header">
-        <button className="icon-btn" onClick={() => nav('/')} aria-label="Kembali"><ArrowLeft size={19} /></button>
+        <button className="icon-btn" onClick={() => go('home')} aria-label="Kembali"><ArrowLeft size={19} /></button>
         <div className="header-title">History<small>Rekap daftar hadir</small></div>
       </header>
 

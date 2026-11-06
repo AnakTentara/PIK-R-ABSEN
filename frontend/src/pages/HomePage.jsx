@@ -1,9 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Sun, Moon, LogOut, History, ScanLine, Users, Keyboard, Loader2, UsersRound, Zap, Pencil } from 'lucide-react';
+import { Sun, Moon, LogOut, History, ScanLine, Users, Keyboard, Loader2, UsersRound, Zap, Pencil, Search, X, ChevronLeft, ChevronRight, CalendarPlus, SearchX } from 'lucide-react';
 import api, { errMsg } from '../lib/api.js';
-import { useTheme, useAuth, storage } from '../lib/store.js';
+import { useTheme, useAuth, useView, storage } from '../lib/store.js';
+import { onBack } from '../lib/back.js';
 import { useQueue } from '../lib/queue.js';
 import { feedback } from '../lib/feedback.js';
 import { burst } from '../lib/confetti.js';
@@ -16,17 +16,31 @@ import { Avatar, StatusBadge, MemberSkeleton } from '../components/Common.jsx';
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const TYPE_LABEL = { PERTEMUAN: 'Pertemuan', WAJIB: 'Wajib', TAMBAHAN: 'Tambahan' };
+const reduceMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+// Pencarian: abaikan huruf besar/kecil, aksen, spasi, dan urutan kata
+const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const tokensOf = q => norm(q).split(/\s+/).filter(Boolean);
+const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Nama dengan bagian yang cocok dengan pencarian disorot. */
+function Highlight({ text, tokens }) {
+  if (!tokens.length) return text;
+  const re = new RegExp(`(${tokens.map(escapeRe).join('|')})`, 'gi');
+  return text.split(re).map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : p));
+}
 
 export function Header({ title = 'Administrasi PIK-R', sub, compact = false }) {
   const { theme, toggle } = useTheme();
   const logout = useAuth(s => s.logout);
+  const go = useView(s => s.go);
   const [spin, setSpin] = useState(false);
-  const onToggle = e => {
+  const onToggle = () => {
     feedback.pop();
     setSpin(false);
     requestAnimationFrame(() => setSpin(true));
     // Tema berganti lewat View Transition (pudar halus) bila browser mendukung
-    if (document.startViewTransition && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (document.startViewTransition && !reduceMotion()) {
       document.startViewTransition(() => toggle());
     } else {
       toggle();
@@ -42,19 +56,20 @@ export function Header({ title = 'Administrasi PIK-R', sub, compact = false }) {
         {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
       </button>
       <button type="button" className="icon-btn" aria-label="Keluar" onClick={() => { if (window.confirm('Keluar dari aplikasi absen?')) logout(); }}><LogOut size={19} /></button>
-      <Link to="/history" className="pill-btn" aria-label="History"><History size={18} /><span className="pill-label">History</span></Link>
+      <button type="button" className="pill-btn" aria-label="History" onClick={() => { feedback.tap(); go('history'); }}><History size={18} /><span className="pill-label">History</span></button>
     </header>
   );
 }
 
-// Kartu anggota di-memo: memilih satu kartu tidak menggambar ulang puluhan kartu lain
-const MemberCard = memo(function MemberCard({ m, index, selected, onSelect }) {
+// Kartu anggota di-memo: memilih satu kartu tidak menggambar ulang puluhan kartu lain.
+// Hanya belasan kartu pertama yang diberi animasi masuk (sisanya langsung tampil, lebih ringan).
+const MemberCard = memo(function MemberCard({ m, index, selected, onSelect, tokens }) {
   return (
-    <button type="button" className={`mcard${selected ? ' sel' : ''}`} style={{ '--i': index }}
+    <button type="button" className={`mcard${selected ? ' sel' : ''}${index < 12 ? ' anim' : ''}`} style={{ '--i': index }}
       aria-pressed={selected} onClick={() => onSelect(m.id)}>
       <StatusBadge record={m.record} />
       <Avatar name={m.name} photo={m.photoPath} size={54} />
-      <span className="nm">{m.name}</span>
+      <span className="nm">{tokens ? <Highlight text={m.name} tokens={tokens} /> : m.name}</span>
       <span className="cl">{m.className}</span>
     </button>
   );
@@ -83,6 +98,26 @@ function QuickResult({ r }) {
   );
 }
 
+/** Kolom cari anggota: nama, kelas, atau kode kartu. */
+function SearchBar({ value, onChange }) {
+  const ref = useRef(null);
+  return (
+    <div className={`search${value ? ' has' : ''}`}>
+      <Search size={18} aria-hidden="true" />
+      <input ref={ref} type="search" className="search-input" value={value} enterKeyHint="search"
+        placeholder="Cari nama, kelas, atau kode kartu" aria-label="Cari anggota"
+        onChange={e => onChange(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
+      {value && (
+        <button type="button" className="search-clear" aria-label="Hapus pencarian"
+          onClick={() => { feedback.tap(); onChange(''); ref.current?.focus(); }}>
+          <X size={16} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const [slide, setSlide] = useState(0);
   const slidesRef = useRef(null);
@@ -97,7 +132,12 @@ export default function HomePage() {
 
   const [data, setData] = useState(null);
   const [letter, setLetter] = useState('A');
+  const [entering, setEntering] = useState(null); // { l, dir } halaman yang baru dituju lewat tombol
   const pagesRef = useRef(null);
+  const lettersRef = useRef(null);
+  const jump = useRef(null); // huruf tujuan saat halaman digulir lewat tombol
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [selected, setSelected] = useState(null);
   const [sheet, setSheet] = useState(null); // null | 'IN' | 'KET'
   const today = nowWibDate();
@@ -110,7 +150,6 @@ export default function HomePage() {
     try {
       const { data } = await api.get('/session/today');
       setTodayInfo(data);
-      if (!data.session) setAskSession(true);
     } catch (err) {
       toast.error(errMsg(err, 'Gagal memuat kegiatan hari ini'));
     }
@@ -129,39 +168,122 @@ export default function HomePage() {
 
   useEffect(() => { loadMembers(); }, [loadMembers]);
 
+  // Popup "Kegiatan Baru" dibuka sendiri sekali, SETELAH kamera dan daftar anggota selesai dimuat.
+  // Dulu ia muncul bersamaan dengan keduanya, itulah sumber patah-patah saat aplikasi dibuka.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asked.current || !todayInfo || todayInfo.session || !data) return undefined;
+    asked.current = true;
+    const t = setTimeout(() => setAskSession(true), 600);
+    return () => clearTimeout(t);
+  }, [todayInfo, data]);
+
   // Huruf yang punya anggota
   const available = useMemo(() => LETTERS.filter(l => data?.groups[l]?.length), [data]);
   useEffect(() => {
     if (available.length && !available.includes(letter)) setLetter(available[0]);
   }, [available, letter]);
+  const letterIndex = available.indexOf(letter);
+
+  // ── Pencarian ───────────────────────────────────────────
+  const searchIndex = useMemo(() => (data ? Object.values(data.groups).flat() : []).map(m => ({
+    m,
+    hay: norm(`${m.name} ${m.className || ''} ${m.jabatan || ''} ${m.memberCode || ''}`),
+    code: norm(m.memberCode).replace(/[^a-z0-9]/g, '')
+  })), [data]);
+  const tokens = useMemo(() => tokensOf(deferredQuery), [deferredQuery]);
+  const results = useMemo(() => {
+    if (!tokens.length) return null;
+    return searchIndex
+      .filter(({ hay, code }) => tokens.every(t => hay.includes(t) || (t.length > 2 && code.includes(t.replace(/[^a-z0-9]/g, '')))))
+      .map(x => x.m)
+      .sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  }, [searchIndex, tokens]);
+  // Tidak ada pilihan otomatis; pilihan yang tidak lagi terlihat dilepas supaya tombol bawah tidak menyasar
+  useEffect(() => {
+    if (results && selected && !results.some(m => m.id === selected)) setSelected(null);
+  }, [results, selected]);
 
   // ── Slide utama (scanner | anggota) ─────────────────────
-  const goSlide = i => {
+  const goSlide = useCallback(i => {
     feedback.tap();
-    slidesRef.current?.scrollTo({ left: i * slidesRef.current.clientWidth, behavior: 'smooth' });
-  };
+    const el = slidesRef.current;
+    el?.scrollTo({ left: i * el.clientWidth, behavior: reduceMotion() ? 'auto' : 'smooth' });
+  }, []);
   const onSlidesScroll = e => {
     const i = Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth);
     if (i !== slide) setSlide(i);
   };
+  // Kembali di HP saat di Daftar Anggota: pindah ke Scan Kartu
+  useEffect(() => (slide === 1 ? onBack(() => { goSlide(0); return true; }) : undefined), [slide, goSlide]);
 
-  // ── Halaman per huruf di dalam box ──────────────────────
-  const goLetter = l => {
-    feedback.tap();
+  // ── Halaman per huruf ───────────────────────────────────
+  // Huruf bersebelahan: digeser halus. Huruf jauh: langsung ke halamannya dengan animasi masuk pendek,
+  // TANPA melewati halaman di antaranya (dulu tiap halaman yang dilewati ikut menyalakan tombol hurufnya
+  // sesaat, itulah kedip-kedip di tombol huruf).
+  const goLetter = useCallback((l, { silent = false } = {}) => {
+    const el = pagesRef.current;
+    const to = available.indexOf(l);
+    if (!el || to < 0) return;
+    if (!silent) feedback.tap();
+    const from = Math.round(el.scrollLeft / el.clientWidth);
     setLetter(l);
-    const i = available.indexOf(l);
-    pagesRef.current?.scrollTo({ left: i * pagesRef.current.clientWidth, behavior: 'smooth' });
+    if (to === from) return;
+    jump.current = l;
+    const near = Math.abs(to - from) === 1 && !reduceMotion();
+    el.scrollTo({ left: to * el.clientWidth, behavior: near ? 'smooth' : 'auto' });
+    if (!near && !reduceMotion()) setEntering({ l, dir: to > from ? 1 : -1, at: Date.now() });
+  }, [available]);
+  const stepLetter = d => {
+    const l = available[letterIndex + d];
+    if (l) goLetter(l);
   };
   const onPagesScroll = e => {
-    const i = Math.round(e.currentTarget.scrollLeft / e.currentTarget.clientWidth);
+    const el = e.currentTarget;
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    if (jump.current) {
+      // Abaikan posisi antara selama berpindah lewat tombol; selesai saat halaman tujuan tercapai
+      if (available[i] === jump.current && Math.abs(el.scrollLeft - i * el.clientWidth) < 2) jump.current = null;
+      return;
+    }
     if (available[i] && available[i] !== letter) setLetter(available[i]);
   };
+  // Pengaman: bila browser tidak mengirim scroll terakhir, lepaskan kunci perpindahan
+  useEffect(() => {
+    if (!jump.current) return undefined;
+    const t = setTimeout(() => { jump.current = null; }, 700);
+    return () => clearTimeout(t);
+  }, [letter]);
+
+  // Tombol huruf: indikator bergeser ke huruf aktif, dan baris huruf ikut menggulir supaya terlihat
+  const [ind, setInd] = useState(null);
+  useEffect(() => {
+    const strip = lettersRef.current;
+    const btn = strip?.querySelector(`[data-l="${letter}"]`);
+    if (!btn) return;
+    setInd({ x: btn.offsetLeft, w: btn.offsetWidth });
+    const left = btn.offsetLeft - (strip.clientWidth - btn.offsetWidth) / 2;
+    strip.scrollTo({ left, behavior: reduceMotion() ? 'auto' : 'smooth' });
+  }, [letter, available, slide]);
+
+  // Selesai mencari: halaman huruf dipasang ulang, langsung kembali ke huruf terakhir (tanpa animasi)
+  const searching = !!results;
+  useLayoutEffect(() => {
+    const el = pagesRef.current;
+    const i = available.indexOf(letter);
+    if (!searching && el && i > 0) el.scrollLeft = i * el.clientWidth;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searching, data]);
+
   // Header mengecil begitu daftar anggota digulir ke bawah
   const onPageScroll = e => {
     const y = e.currentTarget.scrollTop;
     if (!compact && y > 48) setCompact(true);
     else if (compact && y < 8) setCompact(false);
   };
+  // Kartu bergerak masuk hanya di halaman pertama yang terlihat, sekali
+  const animLetter = useRef(null);
+  if (data && animLetter.current === null) animLetter.current = available[0] || '';
 
   // ── Scan ────────────────────────────────────────────────
   const toggleQuick = () => {
@@ -219,13 +341,18 @@ export default function HomePage() {
     return Object.values(data.groups).flat().find(m => m.id === selected) || null;
   }, [selected, data]);
 
+  const popupOpen = !!scan || !!sheet || askSession;
+
   return (
     <div className="app">
       <Header compact={compact} sub={session ? `${TYPE_LABEL[session.type] || 'Kegiatan'} · ${session.title}` : longDate(today)} />
       {todayInfo && !session && (
-        <button className="offline-bar" style={{ border: 0, width: 'calc(100% - 32px)' }} onClick={() => setAskSession(true)}>
-          Belum ada kegiatan hari ini. Ketuk untuk membuat kegiatan baru.
-        </button>
+        <div className="no-session" role="status">
+          <span>Belum ada kegiatan hari ini.</span>
+          <button type="button" className="mini-btn" onClick={() => { feedback.tap(); setAskSession(true); }}>
+            <CalendarPlus size={15} /> Buat Kegiatan
+          </button>
+        </div>
       )}
       {pending > 0 && <div className="offline-bar">{pending} absen menunggu dikirim (offline)</div>}
 
@@ -236,7 +363,7 @@ export default function HomePage() {
 
       <div className="slides" ref={slidesRef} onScroll={onSlidesScroll}>
         {/* Slide 1: Scanner */}
-        <section className="slide">
+        <section className={`slide scan-slide${quick ? ' quick' : ''}`}>
           <div className="scanner-wrap">
             <button type="button" className={`quick-toggle${quick ? ' on' : ''}`} role="switch" aria-checked={quick} onClick={toggleQuick}>
               <span className="qt-ico"><Zap size={18} /></span>
@@ -244,7 +371,7 @@ export default function HomePage() {
               <span className="qt-sw" aria-hidden="true"><i /></span>
             </button>
             {/* Kamera hanya aktif saat slide scanner terlihat (hemat baterai) */}
-            {slide === 0 ? <Scanner onCode={handleCode} paused={!!scan || scanning} /> : <div className="scanner" />}
+            {slide === 0 ? <Scanner onCode={handleCode} paused={popupOpen || scanning} /> : <div className="scanner" />}
             <p className="scan-hint" aria-live="polite">
               {scanning ? <><Loader2 size={14} className="spin" /> {quick ? 'Mencatat…' : 'Memeriksa kartu…'}</> : 'Arahkan barcode ID Card ke dalam kotak'}
             </p>
@@ -267,17 +394,42 @@ export default function HomePage() {
           )}
         </section>
 
-        {/* Slide 2: Daftar anggota per huruf */}
+        {/* Slide 2: Daftar anggota per huruf + pencarian */}
         <section className="slide">
-          <div className="letters">
-            {LETTERS.map(l => (
-              <button key={l} className={l === letter ? 'on' : ''} disabled={!available.includes(l)} onClick={() => goLetter(l)} aria-label={`Huruf ${l}`}>{l}</button>
-            ))}
-          </div>
+          <SearchBar value={query} onChange={setQuery} />
+
+          {!results && (
+            <div className="letter-nav">
+              <button type="button" className="step-btn" aria-label="Huruf sebelumnya" disabled={letterIndex <= 0} onClick={() => stepLetter(-1)}><ChevronLeft size={18} /></button>
+              <div className="letters" ref={lettersRef}>
+                {ind && <span className="letters-ind" style={{ transform: `translateX(${ind.x}px)`, width: ind.w }} aria-hidden="true" />}
+                {LETTERS.map(l => (
+                  <button key={l} data-l={l} className={l === letter ? 'on' : ''} disabled={!available.includes(l)} onClick={() => goLetter(l)} aria-label={`Huruf ${l}`} aria-pressed={l === letter}>{l}</button>
+                ))}
+              </div>
+              <button type="button" className="step-btn" aria-label="Huruf berikutnya" disabled={letterIndex < 0 || letterIndex >= available.length - 1} onClick={() => stepLetter(1)}><ChevronRight size={18} /></button>
+            </div>
+          )}
 
           <div className="member-box">
             {!data ? (
               <MemberSkeleton />
+            ) : results ? (
+              <div className="letter-page search-page" onScroll={onPageScroll}>
+                <div className="search-count">{results.length ? `${results.length} anggota cocok` : ''}</div>
+                {results.length ? (
+                  <div className="grid">
+                    {results.map((m, i) => (
+                      <MemberCard key={m.id} m={m} index={i} selected={selected === m.id} onSelect={onSelect} tokens={tokens} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty">
+                    <div className="empty-ico"><SearchX size={30} /></div>
+                    Tidak ada anggota yang cocok dengan “{deferredQuery.trim()}”.
+                  </div>
+                )}
+              </div>
             ) : !available.length ? (
               <div className="empty">
                 <div className="empty-ico"><UsersRound size={30} /></div>
@@ -286,11 +438,12 @@ export default function HomePage() {
             ) : (
               <div className="letter-pages" ref={pagesRef} onScroll={onPagesScroll}>
                 {available.map(l => (
-                  <div className="letter-page" key={l} onScroll={onPageScroll}>
+                  <div className={`letter-page${entering?.l === l ? (entering.dir > 0 ? ' enter-r' : ' enter-l') : ''}`} key={l}
+                    onScroll={onPageScroll} onAnimationEnd={e => { if (e.target === e.currentTarget) setEntering(null); }}>
                     <h3>{l}</h3>
                     <div className="grid">
                       {data.groups[l].map((m, i) => (
-                        <MemberCard key={m.id} m={m} index={i} selected={selected === m.id} onSelect={onSelect} />
+                        <MemberCard key={m.id} m={m} index={animLetter.current === l ? i : 99} selected={selected === m.id} onSelect={onSelect} />
                       ))}
                     </div>
                   </div>

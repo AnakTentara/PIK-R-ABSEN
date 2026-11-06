@@ -80,19 +80,56 @@ export default function Scanner({ onCode, paused = false }) {
         };
         loop();
       } else {
-        const [{ BrowserMultiFormatReader }, { DecodeHintType, BarcodeFormat }] = await Promise.all([
-          import('@zxing/browser'),
-          import('@zxing/library')
-        ]);
-        const hints = new Map([
+        // Cadangan ZXing (iPhone & HP tanpa BarcodeDetector). Dulu ZXing membaca gambar 1920x1080 penuh
+        // dengan TRY_HARDER tiap 40 ms di thread utama (400-800 ms per percobaan di HP kelas menengah),
+        // dan tetap membaca saat popup terbuka: semua animasi ikut patah-patah. Kini yang dibaca hanya pita
+        // tengah (tempat kotak bidik) yang diperkecil, berhenti total saat popup terbuka, dan memberi jeda
+        // supaya animasi selalu kebagian waktu.
+        const { MultiFormatReader, DecodeHintType, BarcodeFormat, BinaryBitmap, HybridBinarizer, RGBLuminanceSource } =
+          await import('@zxing/library');
+        if (stopped) return;
+        const reader = new MultiFormatReader();
+        reader.setHints(new Map([
           [DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128, BarcodeFormat.QR_CODE]],
           [DecodeHintType.TRY_HARDER, true]
-        ]);
-        const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 40 });
-        if (stopped) return;
-        zxingControls = await reader.decodeFromVideoElement(video, result => {
-          if (result) emit(result.getText());
-        });
+        ]));
+        const canvas = document.createElement('canvas');
+        const g = canvas.getContext('2d', { willReadFrequently: true });
+        let busy = false;
+        let timer;
+        const scanOnce = () => {
+          const vw = video.videoWidth, vh = video.videoHeight;
+          if (!vw || !vh) return;
+          // Pita tengah: 82% lebar x 44% tinggi (sama dengan kotak bidik), lebar dibatasi 960 px.
+          // Garis barcode batang tetap tajam karena yang diperkecil hanya pita, bukan seluruh frame.
+          const sw = Math.round(vw * 0.82), sh = Math.round(vh * 0.44);
+          const scale = Math.min(1, 960 / sw);
+          const w = Math.round(sw * scale), h = Math.round(sh * scale);
+          if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+          g.drawImage(video, (vw - sw) / 2, (vh - sh) / 2, sw, sh, 0, 0, w, h);
+          const { data } = g.getImageData(0, 0, w, h);
+          const lum = new Uint8ClampedArray(w * h);
+          for (let i = 0, j = 0; j < lum.length; i += 4, j++) lum[j] = (data[i] + (data[i + 1] << 1) + data[i + 2]) >> 2;
+          try {
+            const result = reader.decode(new BinaryBitmap(new HybridBinarizer(new RGBLuminanceSource(lum, w, h))));
+            if (result) emit(result.getText());
+          } catch { /* tidak ada kode di frame ini */ }
+        };
+        const loop = () => {
+          if (stopped) return;
+          if (!busy && !pausedRef.current && video.readyState >= 2 && !document.hidden) {
+            busy = true;
+            const t0 = performance.now();
+            scanOnce();
+            busy = false;
+            // Jeda sebanding lama baca: HP lambat otomatis membaca lebih jarang
+            timer = setTimeout(loop, Math.max(60, (performance.now() - t0) * 1.5));
+            return;
+          }
+          timer = setTimeout(loop, 150);
+        };
+        loop();
+        zxingControls = { stop: () => clearTimeout(timer) };
       }
     }
 

@@ -7,6 +7,8 @@ import { Sheet } from './Common.jsx';
 
 /**
  * Popup "Kegiatan Baru": muncul saat aplikasi dibuka di luar hari wajib.
+ * Kolom judul sengaja tidak langsung difokus: keyboard yang muncul di tengah animasi popup
+ * membuat seluruh halaman dihitung ulang, itulah yang membuat popup ini terasa patah-patah.
  * Judul wajib, deskripsi opsional. Kegiatan ini bertipe TAMBAHAN (Alfa diisi manual).
  */
 export default function NewSessionSheet({ info, onCreated, onClose }) {
@@ -46,7 +48,7 @@ export default function NewSessionSheet({ info, onCreated, onClose }) {
         </p>
         <div>
           <label className="label" htmlFor="st">Judul kegiatan (wajib)</label>
-          <input id="st" className="field" maxLength={100} value={title} autoFocus
+          <input id="st" className="field" maxLength={100} value={title} enterKeyHint="next"
             placeholder="mis. Rapat Pengurus" onChange={e => setTitle(e.target.value)} required />
         </div>
         <div>

@@ -58,3 +58,10 @@ export const useTheme = create(set => ({
     return { theme };
   })
 }));
+
+// Aplikasi hanya punya dua layar: Beranda (scan + daftar anggota) dan History.
+// Disimpan sebagai state, bukan alamat URL, supaya tombol Kembali di HP bisa diatur sepenuhnya (lib/back.js).
+export const useView = create(set => ({
+  view: 'home',
+  go: view => set({ view })
+}));

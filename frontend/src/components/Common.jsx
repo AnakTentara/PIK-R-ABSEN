@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { X, Check, LogOut, Thermometer, FileText, UserX, Minus } from 'lucide-react';
 import { photoUrl } from '../lib/api.js';
+import { onBack } from '../lib/back.js';
 
 export const Avatar = memo(function Avatar({ name, photo, size = 56 }) {
   const initials = (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
@@ -14,7 +15,7 @@ export const Avatar = memo(function Avatar({ name, photo, size = 56 }) {
 
 /**
  * Bottom sheet dengan animasi masuk (pegas) dan keluar (meluncur turun).
- * Klik latar / Escape menutup. `onClose` dipanggil SETELAH animasi keluar selesai,
+ * Klik latar / Escape / tombol Kembali di HP menutup. `onClose` dipanggil SETELAH animasi keluar selesai,
  * jadi perilaku pemanggil tidak berubah (hanya terasa lebih halus).
  */
 export function Sheet({ children, onClose, top = false, title }) {
@@ -36,6 +37,11 @@ export function Sheet({ children, onClose, top = false, title }) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [close]);
+
+  // Kembali di HP menutup popup ini dulu (popup paling atas didaftarkan terakhir)
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => onBack(() => { closeRef.current(); return true; }, 10), []);
 
   return (
     <div className={`overlay${top ? ' top' : ''}${closing ? ' closing' : ''}`} onClick={e => e.target === e.currentTarget && close()}>

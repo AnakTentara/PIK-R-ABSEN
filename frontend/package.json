@@ -1,7 +1,7 @@
 {
   "name": "pikr-absen-frontend",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@zxing/browser": "0.2.1",
     "@zxing/library": "0.23.0",
     "axios": "1.7.9",
     "jspdf": "2.5.2",
@@ -18,7 +17,6 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-hot-toast": "2.4.1",
-    "react-router-dom": "6.28.0",
     "zustand": "5.0.2"
   },
   "devDependencies": {
